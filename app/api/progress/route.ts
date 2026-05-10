@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getJob } from '@/lib/queue';
+import { expireQueuedJob, getJob } from '@/lib/queue';
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,13 +13,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const job = await getJob(jobId);
+    let job = await getJob(jobId);
 
     if (!job) {
       return NextResponse.json(
         { error: 'Job not found' },
         { status: 404 }
       );
+    }
+
+    if (job.status === 'queued' && await expireQueuedJob(jobId)) {
+      job = await getJob(jobId);
+      if (!job) {
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      }
     }
 
     return NextResponse.json(job, { status: 200 });

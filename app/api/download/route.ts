@@ -57,28 +57,17 @@ export async function GET(request: NextRequest) {
         Key: key,
       });
 
-      const object = await s3Client.send(getCommand);
-      const objectBody = object.Body;
+      const safeFilename = filename.replace(/[^\x20-\x7E]|["\\]/g, '_');
+      getCommand.input.ResponseContentType = contentType;
+      getCommand.input.ResponseContentDisposition = `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 
-      if (!objectBody) {
-        return NextResponse.json(
-          { error: 'File body not available' },
-          { status: 500 }
-        );
-      }
-
-      const headers = new Headers({
-        'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${filename}"`,
+      // Sign locally, then let R2 send the object directly to the browser. This
+      // avoids routing large media files through the Render instance.
+      const signedUrl = await getSignedUrl(s3Client, getCommand, {
+        expiresIn: 300,
       });
 
-      if (object.ContentLength) {
-        headers.set('Content-Length', object.ContentLength.toString());
-      }
-
-      return new NextResponse(objectBody as any, {
-        headers,
-      });
+      return NextResponse.redirect(signedUrl, 307);
     } catch (error) {
       console.error('Error streaming file from R2:', error);
       return NextResponse.json(

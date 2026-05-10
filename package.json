@@ -2,10 +2,13 @@
   "name": "my-project",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@11.19.0",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:local": "node ./scripts/local-server.js",
+    "cleanup:local": "node ./scripts/shutdown-cleanup.js",
     "lint": "eslint .",
     "worker": "node ./scripts/queue-worker.js"
   },
@@ -13,6 +16,7 @@
     "@aws-sdk/client-s3": "^3.1045.0",
     "@aws-sdk/s3-request-presigner": "^3.1045.0",
     "@distube/ytdl-core": "^4.16.12",
+    "@fontsource-variable/oxanium": "^5.3.0",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "1.2.12",
     "@radix-ui/react-alert-dialog": "1.1.15",

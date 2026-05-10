@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, type MouseEvent } from 'react';
-import { motion, AnimatePresence, type PanInfo } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Select,
   SelectContent,
@@ -58,7 +58,7 @@ const MobileStatusPill = ({ state }: { state: string }) => (
     textTransform: 'uppercase' as const,
     border: state === 'PROCESSING' ? '1px solid rgba(255,79,79,0.3)' : '1px solid rgba(255,255,255,0.12)',
   }}>
-    {state === 'PROCESSING' ? '● Converting' : state === 'SUCCESS' ? '✓ Ready' : 'Ready'}
+    {state === 'PROCESSING' ? '● Converting' : state === 'FAILED' ? 'Try again' : state === 'SUCCESS' ? '✓ Ready' : 'Ready'}
   </div>
 );
 
@@ -317,20 +317,20 @@ export default function Home() {
     handleUrlChange,
     startConversion,
     confirmSelection,
+    retryConversion,
     reset,
     setFormat,
     setAudioQuality,
     setVideoQuality,
+    setError,
     mode,
     setMode,
-    markDownloaded,
     firstProgressUpdateAt,
   } = useConversion();
 
   const [configError, setConfigError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [messageIndex, setMessageIndex] = useState(0);
-  const [isActionSheetOpen, setIsActionSheetOpen] = useState(true);
-  const [isActionSheetExpanded, setIsActionSheetExpanded] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
 
   useEffect(() => {
@@ -437,36 +437,23 @@ export default function Home() {
 
   const downloadFile = async (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
-    if (!job?.id) return;
-
-    const filename = getDownloadFilename();
+    if (!job?.id || isDownloading) return;
 
     try {
-      const response = await fetch(`/api/download?jobId=${job.id}`);
-      if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        throw new Error(data?.error || 'Download failed');
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      setIsDownloading(true);
+      setError(null);
       const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
+      link.href = `/api/download?jobId=${encodeURIComponent(job.id)}`;
+      link.download = getDownloadFilename();
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      const cleanupResponse = await fetch(`/api/cleanup?jobId=${job.id}`, { method: 'DELETE' });
-      if (cleanupResponse.ok) {
-        markDownloaded();
-      } else {
-        console.warn('Cleanup failed after download', await cleanupResponse.text());
-      }
-    } catch (err) {
-      console.error('Download button failed:', err);
-      alert('Download failed. Please try again.');
+      // The browser owns the direct R2 transfer after the redirect. Keep the
+      // file available so the user can retry within its 10-minute lifetime.
+      window.setTimeout(() => setIsDownloading(false), 3000);
+    } catch {
+      setIsDownloading(false);
+      setError('Please try again later.');
     }
   };
 
@@ -474,12 +461,14 @@ export default function Home() {
     const isSmallPhone = typeof window !== 'undefined' && window.innerWidth < 430;
 
     const mobileShellStyle = {
-      minHeight: '100vh',
-      padding: isSmallPhone ? '10px 10px 238px' : '14px 14px 254px',
+      minHeight: '100dvh',
+      padding: isSmallPhone ? '12px' : '18px',
       position: 'relative' as const,
       zIndex: 10,
       overflow: 'hidden',
       fontFamily: 'var(--font-orbitron)',
+      boxSizing: 'border-box' as const,
+      width: '100%',
     };
 
     const mobileCardStyle = {
@@ -494,6 +483,7 @@ export default function Home() {
       display: 'grid',
       gap: isSmallPhone ? '12px' : '14px',
       fontFamily: 'var(--font-orbitron)',
+      minWidth: 0,
     };
 
     const mobileInputStyle = {
@@ -511,72 +501,10 @@ export default function Home() {
       borderRadius: '18px',
     };
 
-    const mobileHeroCardStyle = {
-      ...mobileCardStyle,
-      background: 'linear-gradient(135deg, rgba(255, 63, 63, 0.18), rgba(12, 12, 14, 0.96) 55%, rgba(255, 63, 63, 0.08))',
-      borderColor: 'rgba(255, 92, 92, 0.18)',
-      gap: isSmallPhone ? '10px' : '12px',
-    };
-
-    const mobileSheetStyle = {
-      position: 'fixed' as const,
-      left: isSmallPhone ? '10px' : '14px',
-      right: isSmallPhone ? '10px' : '14px',
-      bottom: isSmallPhone ? '10px' : '14px',
-      maxWidth: '560px',
-      margin: '0 auto',
-      zIndex: 22,
-      background: 'linear-gradient(180deg, rgba(18, 18, 22, 0.98), rgba(9, 9, 11, 0.98) 55%, rgba(14, 14, 18, 0.98))',
-      borderWidth: '1px',
-      borderStyle: 'solid',
-      borderColor: 'rgba(255,255,255,0.09)',
-      borderRadius: '26px 26px 22px 22px',
-      boxShadow: '0 -24px 60px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
-      backdropFilter: 'blur(18px)',
-      overflow: 'hidden',
-      fontFamily: 'var(--font-orbitron)',
-    };
-
-    const mobileSheetInnerStyle = {
-      display: 'grid',
-      gap: isSmallPhone ? '10px' : '12px',
-      padding: isSmallPhone ? '12px' : '14px',
-      maxHeight: isActionSheetExpanded
-        ? isSmallPhone
-          ? 'calc(100vh - 280px)'
-          : 'calc(100vh - 300px)'
-        : isSmallPhone
-          ? 'calc(100vh - 420px)'
-          : 'calc(100vh - 440px)',
-      overflowY: 'auto' as const,
-      WebkitOverflowScrolling: 'touch' as const,
-    };
-
     const mobileOptionStyle = {
       ...styles.optionCard,
       minHeight: isSmallPhone ? '68px' : '60px',
       borderRadius: '18px',
-    };
-
-    const mobileJourney = [
-      { key: 'idle', label: 'Paste' },
-      { key: 'selection', label: 'Choose' },
-      { key: 'processing', label: 'Convert' },
-      { key: 'success', label: 'Download' },
-    ] as const;
-
-    const activeJourneyIndex = state === 'idle' ? 0 : state === 'selection' ? 1 : state === 'processing' ? 2 : 3;
-
-    const handleActionSheetDragEnd = (_event: any, info: PanInfo) => {
-      if (info.offset.y < -40) {
-        setIsActionSheetExpanded(true);
-        setIsActionSheetOpen(true);
-        return;
-      }
-
-      if (info.offset.y > 40) {
-        setIsActionSheetExpanded(false);
-      }
     };
 
     return (
@@ -616,31 +544,22 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        <div style={{ position: 'relative', zIndex: 5, maxWidth: '560px', margin: '0 auto', display: 'grid', gap: '14px' }}>
-          <div style={mobileHeroCardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+        <div style={{ position: 'relative', zIndex: 5, width: '100%', minWidth: 0, maxWidth: '560px', margin: '0 auto', display: 'grid', gap: '14px' }}>
+          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '12px 4px 10px' }}>
               <div>
-                <p style={{ ...styles.label, fontSize: '0.68rem' }}>Pocket mode</p>
-                <h1 style={{ color: 'white', fontSize: isSmallPhone ? '1.45rem' : '1.8rem', lineHeight: 1.05, marginTop: '6px', fontFamily: 'var(--font-orbitron)', letterSpacing: '0.02em' }}>
-                  <span>You</span><span>Tube </span><span>To MP4 & MP3</span>
+                <h1 style={{ color: 'white', fontSize: isSmallPhone ? '1.35rem' : '1.6rem', lineHeight: 1.05, fontFamily: 'var(--font-orbitron)', letterSpacing: '-0.02em' }}>
+                  <span style={{ color: '#ff5a5f' }}>YT</span> Converter
                 </h1>
+                <p style={{ color: '#9ca3af', fontSize: '0.78rem', marginTop: '5px' }}>Audio or video in a few taps</p>
               </div>
               <MobileStatusPill state={state.toUpperCase()} />
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '8px' }}>
-              <span style={{ padding: '8px 12px', borderRadius: '999px', background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: '0.78rem', border: '1px solid rgba(255,255,255,0.08)' }}>One-hand friendly</span>
-              <span style={{ padding: '8px 12px', borderRadius: '999px', background: 'rgba(255,63,63,0.12)', color: '#ffd4d4', fontSize: '0.78rem', border: '1px solid rgba(255,63,63,0.18)' }}>Quick convert</span>
-            </div>
-            <p style={{ color: '#cbd5e1', fontSize: isSmallPhone ? '0.86rem' : '0.92rem', lineHeight: 1.5 }}>
-              A pocket-sized conversion flow built for thumbs, quick glances, and short interactions.
-            </p>
-          </div>
+          </header>
 
-          <div style={{ ...mobileCardStyle, gap: isSmallPhone ? '10px' : '12px' }}>
+          <div style={{ ...mobileCardStyle, gap: isSmallPhone ? '14px' : '16px', display: job ? 'none' : 'grid' }}>
             <div style={{ position: 'relative' }}>
               <input
                 type="text"
-                placeholder="Paste YouTube URL..."
+                placeholder="YouTube link"
                 value={url}
                 onChange={(e) => handleUrlChange(e.target.value)}
                 style={{
@@ -668,10 +587,9 @@ export default function Home() {
             )}
 
             <div style={{ display: 'grid', gap: '12px' }}>
-              <div style={styles.label}>Source</div>
-              <div style={{ display: 'grid', gridTemplateColumns: isSmallPhone ? '1fr' : '1fr 1fr', gap: isSmallPhone ? '8px' : '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
                 {[
-                  { id: 'individual', icon: HeadphonesIcon, label: 'Individual' },
+                  { id: 'individual', icon: HeadphonesIcon, label: 'Single' },
                   { id: 'playlist', icon: Film01Icon, label: 'Playlist' },
                 ].map((option) => (
                   <button
@@ -685,6 +603,8 @@ export default function Home() {
                       backgroundColor: mode === option.id ? 'rgba(255, 79, 79, 0.14)' : 'rgba(255, 255, 255, 0.03)',
                       color: 'white',
                       padding: isSmallPhone ? '14px 10px' : '18px',
+                      minWidth: 0,
+                      width: '100%',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' as const }}>
@@ -695,12 +615,11 @@ export default function Home() {
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gap: '12px' }}>
-                <div style={styles.label}>Format</div>
-                <div style={{ display: 'grid', gridTemplateColumns: isSmallPhone ? '1fr' : '1fr 1fr', gap: isSmallPhone ? '8px' : '10px' }}>
+              <div style={{ display: 'grid', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px' }}>
                   {[
-                    { id: 'mp3', icon: HeadphonesIcon, label: 'Audio' },
-                    { id: 'mp4', icon: Film01Icon, label: 'Video' },
+                    { id: 'mp3', icon: HeadphonesIcon, label: 'MP3' },
+                    { id: 'mp4', icon: Film01Icon, label: 'MP4' },
                   ].map((option) => (
                     <button
                       key={option.id}
@@ -713,6 +632,8 @@ export default function Home() {
                         backgroundColor: format === option.id ? 'rgba(255, 79, 79, 0.14)' : 'rgba(255, 255, 255, 0.03)',
                         color: 'white',
                         padding: isSmallPhone ? '14px 10px' : '18px',
+                        minWidth: 0,
+                        width: '100%',
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' as const }}>
@@ -760,17 +681,6 @@ export default function Home() {
                 )}
               </div>
 
-              <div style={{
-                borderRadius: '18px',
-                padding: '14px',
-                border: '1px solid rgba(255,255,255,0.08)',
-                background: 'rgba(255,255,255,0.03)',
-              }}>
-                <p style={{ color: '#93c5fd', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: '6px', fontFamily: 'var(--font-orbitron)' }}>Storage Info</p>
-                <p style={{ color: '#dbeafe', fontSize: '0.9rem', marginBottom: '4px', fontFamily: 'var(--font-orbitron)' }}>{storageInfoText}</p>
-                <p style={{ color: '#9ca3af', fontSize: '0.8rem', lineHeight: 1.45, fontFamily: 'var(--font-orbitron)' }}>{mode === 'playlist' ? 'Playlist size limit.' : format === 'mp3' ? 'Audio size limit.' : 'Video size limit.'}</p>
-              </div>
-
               {!job && (
                 <button
                   type="button"
@@ -786,22 +696,35 @@ export default function Home() {
                     zIndex: 15,
                   }}
                 >
-                  Fetch Metadata
+                  Continue
                 </button>
               )}
             </div>
           </div>
 
-          {job?.metadata?.thumbnail && (
+          {job && (
             <div style={mobileCardStyle}>
-              <img
-                src={job.metadata.thumbnail}
-                alt={job.metadata.title || 'YouTube thumbnail'}
-                style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: '16px' }}
-              />
+              {job.metadata?.thumbnail && (
+                <img
+                  src={job.metadata.thumbnail}
+                  alt={job.metadata.title || 'YouTube thumbnail'}
+                  style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: '16px' }}
+                />
+              )}
               <div>
-                <p style={{ ...styles.label, marginBottom: '8px' }}>Now processing</p>
                 <p style={{ color: 'white', fontWeight: 700, fontSize: '1rem', lineHeight: 1.35 }}>{job.metadata.title || 'Untitled video'}</p>
+                <p style={{ color: '#9ca3af', fontSize: '0.8rem', marginTop: '6px' }}>{job.metadata.author || 'YouTube'}</p>
+
+                {state === 'selection' && (
+                  <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
+                    <button onClick={confirmSelection} style={{ ...mobileButtonStyle, ...styles.primaryButton }}>
+                      Convert to {format.toUpperCase()}
+                    </button>
+                    <button onClick={reset} style={{ ...mobileButtonStyle, ...styles.secondaryButton }}>
+                      Back
+                    </button>
+                  </div>
+                )}
 
                 {state === 'processing' && job && (
                   <div style={{ marginTop: '12px', display: 'grid', gap: '8px' }}>
@@ -812,15 +735,24 @@ export default function Home() {
                       <span>{job.status === 'queued' ? 'Queued' : `${Math.round(job.progress ?? 0)}%`}</span>
                       <span style={{ maxWidth: '70%', textAlign: 'right' }}>{progressCallout}</span>
                     </div>
+                    {error && <p role="alert" style={{ color: '#ff7777', fontSize: '0.86rem', lineHeight: 1.45 }}>{error}</p>}
                   </div>
                 )}
 
+                {state === 'failed' && job && (
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
+                    <p role="alert" style={{ color: '#ff7777', fontSize: '0.9rem', lineHeight: 1.45 }}>Please try again later.</p>
+                    <button onClick={retryConversion} style={{ ...mobileButtonStyle, ...styles.primaryButton }}>Try conversion again</button>
+                    <button onClick={reset} style={{ ...mobileButtonStyle, ...styles.secondaryButton }}>Use a different link</button>
+                  </motion.div>
+                )}
+
                 {state === 'success' && job && (
-                  <div style={{ marginTop: '12px', display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <div style={{ marginTop: '16px', display: 'grid', gap: '10px' }}>
                     {job.fileUrl ? (
-                      <button onClick={downloadFile} style={{ ...mobileButtonStyle, ...styles.primaryButton }}>
+                      <button disabled={isDownloading} aria-busy={isDownloading} onClick={downloadFile} style={{ ...mobileButtonStyle, ...styles.primaryButton, opacity: isDownloading ? 0.72 : 1, cursor: isDownloading ? 'wait' : 'pointer' }}>
                         <Download01Icon size={18} strokeWidth={2} />
-                        Download file
+                        {isDownloading ? 'Downloading...' : 'Download file'}
                       </button>
                     ) : (
                       <div style={{ color: '#9ca3af' }}>Download will appear here when ready.</div>
@@ -836,112 +768,25 @@ export default function Home() {
             </div>
           )}
 
-          <div style={{ ...mobileCardStyle, gap: isSmallPhone ? '10px' : '12px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '6px' }}>
-              {mobileJourney.map((step, index) => {
-                const isActive = index === activeJourneyIndex;
-                const isBehind = index < activeJourneyIndex;
-
-                return (
-                  <div
-                    key={step.key}
-                    style={{
-                      borderRadius: '14px',
-                      padding: '8px 6px',
-                      border: `1px solid ${isActive ? 'rgba(255,79,79,0.32)' : 'rgba(255,255,255,0.07)'}`,
-                      background: isActive
-                        ? 'linear-gradient(180deg, rgba(255,79,79,0.22), rgba(255,79,79,0.08))'
-                        : isBehind
-                          ? 'rgba(255,255,255,0.05)'
-                          : 'rgba(255,255,255,0.025)',
-                      color: 'white',
-                      textAlign: 'center',
-                      boxShadow: isActive ? '0 10px 24px rgba(255,79,79,0.12)' : 'none',
-                    }}
-                  >
-                    <p style={{ fontSize: '0.62rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: isActive ? '#ffd4d4' : '#9ca3af', marginBottom: '4px', fontFamily: 'var(--font-orbitron)' }}>
-                      {String(index + 1).padStart(2, '0')}
-                    </p>
-                    <p style={{ fontSize: '0.76rem', fontWeight: 700, color: isActive ? 'white' : isBehind ? '#dbeafe' : '#cbd5e1', fontFamily: 'var(--font-orbitron)' }}>{step.label}</p>
+          <section aria-labelledby="mobile-how-it-works" style={{ padding: '22px 6px 28px' }}>
+            <h2 id="mobile-how-it-works" style={{ color: 'white', fontSize: '0.95rem', fontWeight: 700, marginBottom: '14px' }}>How it works</h2>
+            <div style={{ display: 'grid', gap: '12px' }}>
+              {[
+                ['1', 'Choose', 'Add a YouTube link and select MP3 or MP4.'],
+                ['2', 'Convert', 'Your request joins the processing queue.'],
+                ['3', 'Download', 'Save the finished file within 10 minutes.'],
+              ].map(([number, title, description]) => (
+                <div key={number} style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: '12px', alignItems: 'start' }}>
+                  <span style={{ display: 'grid', placeItems: 'center', width: '32px', height: '32px', borderRadius: '10px', background: 'rgba(255,79,79,0.13)', color: '#ff7777', fontSize: '0.78rem', fontWeight: 700 }}>{number}</span>
+                  <div>
+                    <p style={{ color: 'white', fontSize: '0.88rem', fontWeight: 700 }}>{title}</p>
+                    <p style={{ color: '#8f929b', fontSize: '0.78rem', lineHeight: 1.5, marginTop: '3px' }}>{description}</p>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
+          </section>
 
-            <AnimatePresence mode="wait">
-                    {state === 'idle' && (
-                      <motion.div key="mobile-idle" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-                        <p style={{ ...styles.label, marginBottom: '10px', fontFamily: 'var(--font-orbitron)' }}>How it works</p>
-                        <div style={{ display: 'grid', gap: '12px' }}>
-                          {[
-                            'Paste a YouTube link',
-                            'Choose audio or video',
-                            'Pick your quality',
-                            'Download and enjoy',
-                          ].map((item) => (
-                            <div key={item} style={{ padding: '12px 14px', borderRadius: '16px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', color: 'white', fontSize: '0.92rem', fontFamily: 'var(--font-orbitron)' }}>
-                              {item}
-                            </div>
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {state === 'selection' && job && (
-                      <motion.div key="mobile-selection" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} style={{ display: 'grid', gap: '12px' }}>
-                        <p style={{ ...styles.label, marginBottom: '2px', fontFamily: 'var(--font-orbitron)' }}>Ready to convert</p>
-                        <p style={{ color: 'white', fontWeight: 700, fontSize: '1.02rem', lineHeight: 1.35 }}>{job.metadata?.title || 'Untitled video'}</p>
-                        <p style={styles.smallText}>{job.metadata?.author || 'Unknown channel'}</p>
-                        <button onClick={confirmSelection} style={{ ...mobileButtonStyle, ...styles.primaryButton }}>
-                          Convert now
-                        </button>
-                      </motion.div>
-                    )}
-
-                    {state === 'processing' && job && (
-                      <motion.div key="mobile-processing" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} style={{ display: 'grid', gap: '12px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
-                          <span style={{ color: 'white', fontWeight: 700, fontFamily: 'var(--font-orbitron)' }}>Progress</span>
-                          <span style={{ color: '#9ca3af', fontFamily: 'var(--font-orbitron)' }}>{job.status === 'queued' ? 'Queued' : `${Math.round(job.progress)}%`}</span>
-                        </div>
-                        <div className="indeterminate-wrapper" style={{ height: '10px' }}>
-                          {job.progress === 0 && job.status === 'queued' ? (
-                            <div className="indeterminate-stripe" />
-                          ) : (
-                            <div className="progress-bar" style={{ width: `${Math.min(job.progress, 95)}%` }} />
-                          )}
-                        </div>
-                        <p style={{ color: '#dbeafe', fontSize: '0.92rem', lineHeight: 1.5, fontFamily: 'var(--font-orbitron)' }}>{progressCallout}</p>
-                        <p style={{ ...styles.smallText, fontFamily: 'var(--font-orbitron)' }}>{job.statusMessage || 'Processing your file...'}</p>
-                      </motion.div>
-                    )}
-
-                    {state === 'success' && job && (
-                      <motion.div key="mobile-success" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} style={{ display: 'grid', gap: '12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <CheckmarkCircle01Icon size={34} strokeWidth={2} style={{ color: '#ff5f5f' }} />
-                          <div>
-                            <p style={{ ...styles.label, marginBottom: '4px', fontFamily: 'var(--font-orbitron)' }}>Completed</p>
-                            <p style={{ color: 'white', fontWeight: 700, fontSize: '1rem', fontFamily: 'var(--font-orbitron)' }}>Download is ready</p>
-                          </div>
-                        </div>
-                        <div style={{ padding: '14px', borderRadius: '18px', background: 'rgba(255,255,255,0.04)', color: '#dbeafe', fontFamily: 'var(--font-orbitron)' }}>
-                          {job.fileSize ? formatFileSize(job.fileSize) : 'Unknown size'}
-                        </div>
-                        {job.fileUrl && (
-                          <button onClick={downloadFile} style={{ ...mobileButtonStyle, ...styles.primaryButton }}>
-                            <Download01Icon size={18} strokeWidth={2} />
-                            Download file
-                          </button>
-                        )}
-                        <button onClick={reset} style={{ ...mobileButtonStyle, ...styles.secondaryButton }}>
-                          <Rotate01Icon size={18} strokeWidth={2} />
-                          Convert another
-                        </button>
-                      </motion.div>
-                    )}
-            </AnimatePresence>
-          </div>
         </div>
       </div>
     );
@@ -997,12 +842,12 @@ export default function Home() {
             <div className="app-status-panel" style={styles.statusPanel}>
               <div>
                 <p style={{ color: '#e2e8f0', fontSize: '0.85rem', letterSpacing: '0.12em', textTransform: 'uppercase' as const }}>System status</p>
-                <p style={{ color: 'white', fontSize: '1rem', fontWeight: 700 }}>{state === 'idle' ? 'Ready to convert' : state === 'fetching' ? 'Fetching metadata' : state === 'selection' ? 'Awaiting your choice' : state === 'processing' ? 'Processing your file' : 'Download is ready'}</p>
+                <p style={{ color: 'white', fontSize: '1rem', fontWeight: 700 }}>{state === 'idle' ? 'Ready to convert' : state === 'fetching' ? 'Fetching metadata' : state === 'selection' ? 'Awaiting your choice' : state === 'processing' ? 'Processing your file' : state === 'failed' ? 'Conversion paused' : 'Download is ready'}</p>
               </div>
               {state === 'success' && job?.fileUrl ? (
-                <motion.button onClick={downloadFile} style={{ ...styles.button, ...styles.primaryButton, padding: '12px 18px 12px 20px', width: 'auto', textDecoration: 'none' }} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <motion.button disabled={isDownloading} aria-busy={isDownloading} onClick={downloadFile} style={{ ...styles.button, ...styles.primaryButton, padding: '12px 18px 12px 20px', width: 'auto', textDecoration: 'none', opacity: isDownloading ? 0.72 : 1, cursor: isDownloading ? 'wait' : 'pointer' }} whileHover={isDownloading ? undefined : { scale: 1.02 }} whileTap={isDownloading ? undefined : { scale: 0.98 }}>
                   <Download01Icon size={18} strokeWidth={2} />
-                  Download is ready
+                  {isDownloading ? 'Downloading...' : 'Download is ready'}
                 </motion.button>
               ) : (
                 <span style={styles.statusPill}>{state.toUpperCase()}</span>
@@ -1032,7 +877,7 @@ export default function Home() {
                   </div>
                 )}
               </div>
-              {error && (
+              {error && state !== 'failed' && (
                 <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ff6b6b', fontSize: '0.92rem' }}>
                   <AlertCircleIcon size={16} strokeWidth={2} />
                   {error}
@@ -1333,6 +1178,23 @@ export default function Home() {
                 </motion.div>
               )}
 
+              {state === 'failed' && job && (
+                <motion.div key="failed" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
+                  <div style={{ display: 'grid', gap: '18px' }}>
+                    {job.metadata?.thumbnail && (
+                      <div style={{ borderRadius: '22px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <img src={job.metadata.thumbnail} alt={job.metadata.title || 'YouTube thumbnail'} style={{ width: '100%', height: '220px', objectFit: 'cover', display: 'block' }} />
+                      </div>
+                    )}
+                    <p role="alert" style={{ color: '#ff7777', fontSize: '0.95rem' }}>Please try again later.</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <motion.button onClick={reset} style={{ ...styles.button, ...styles.secondaryButton }} whileTap={{ scale: 0.98 }}>Different link</motion.button>
+                      <motion.button onClick={retryConversion} style={{ ...styles.button, ...styles.primaryButton }} whileTap={{ scale: 0.98 }}>Try again</motion.button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
               {state === 'success' && job && (
                 <motion.div key="success" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}>
                   <div style={{ display: 'grid', gap: '18px' }}>
@@ -1355,9 +1217,9 @@ export default function Home() {
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: job.fileUrl ? '1fr 1fr' : '1fr', gap: '12px' }}>
                       {job.fileUrl ? (
-                        <motion.button onClick={downloadFile} style={{ ...styles.button, ...styles.primaryButton, textDecoration: 'none' }} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                        <motion.button disabled={isDownloading} aria-busy={isDownloading} onClick={downloadFile} style={{ ...styles.button, ...styles.primaryButton, textDecoration: 'none', opacity: isDownloading ? 0.72 : 1, cursor: isDownloading ? 'wait' : 'pointer' }} whileHover={isDownloading ? undefined : { scale: 1.02 }} whileTap={isDownloading ? undefined : { scale: 0.98 }}>
                           <Download01Icon size={20} strokeWidth={2} />
-                          Download File
+                          {isDownloading ? 'Downloading...' : 'Download file'}
                         </motion.button>
                       ) : (
                         <div style={{ padding: '18px', borderRadius: '22px', backgroundColor: 'rgba(255,255,255,0.04)', color: '#cbd5e1' }}>

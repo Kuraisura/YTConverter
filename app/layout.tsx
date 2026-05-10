@@ -1,19 +1,6 @@
 import type { Metadata, Viewport } from 'next'
-import { Analytics } from '@vercel/analytics/next'
-import { Orbitron, Space_Grotesk } from 'next/font/google'
+import '@fontsource-variable/oxanium'
 import './globals.css'
-
-const orbitron = Orbitron({
-  subsets: ['latin'],
-  variable: '--font-orbitron',
-  weight: ['400', '500', '600', '700', '800', '900'],
-})
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ['latin'],
-  variable: '--font-space-grotesk',
-  weight: ['400', '500', '600', '700'],
-})
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -43,9 +30,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${orbitron.variable} ${spaceGrotesk.variable} font-sans antialiased bg-[#050505] text-white min-h-screen`}>
+      <body className="font-sans antialiased bg-[#050505] text-white min-h-screen">
         {children}
-        {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
   )

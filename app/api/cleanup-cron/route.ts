@@ -8,7 +8,15 @@ export async function GET(request: NextRequest) {
   try {
     // Optional: Check for authorization header to prevent unauthorized triggers
     const authHeader = request.headers.get('authorization');
-    const expectedToken = process.env.CLEANUP_CRON_TOKEN || 'change-this-token';
+    const expectedToken = process.env.CLEANUP_CRON_TOKEN;
+
+    if (!expectedToken) {
+      console.error('[Cleanup Cron] CLEANUP_CRON_TOKEN is not configured');
+      return NextResponse.json(
+        { error: 'Cleanup endpoint is not configured' },
+        { status: 503 }
+      );
+    }
 
     if (authHeader !== `Bearer ${expectedToken}`) {
       return NextResponse.json(
@@ -48,7 +56,15 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
-    const expectedToken = process.env.CLEANUP_CRON_TOKEN || 'change-this-token';
+    const expectedToken = process.env.CLEANUP_CRON_TOKEN;
+
+    if (!expectedToken) {
+      console.error('[Cleanup Cron] CLEANUP_CRON_TOKEN is not configured');
+      return NextResponse.json(
+        { error: 'Cleanup endpoint is not configured' },
+        { status: 503 }
+      );
+    }
 
     if (authHeader !== `Bearer ${expectedToken}`) {
       return NextResponse.json(

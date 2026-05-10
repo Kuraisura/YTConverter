@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { VideoMetadata } from '@/lib/youtube';
 
-export type ConversionState = 'idle' | 'fetching' | 'selection' | 'processing' | 'success';
+export type ConversionState = 'idle' | 'fetching' | 'selection' | 'processing' | 'failed' | 'success';
 
 export interface ConversionJob {
   id: string;
@@ -38,11 +38,8 @@ export function useConversion() {
 
   const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pollingStartTimeRef = useRef<number>(0);
-  const progressPollAttemptsRef = useRef<number>(0);
   const pollingInterval = 800;
   const maxPollingTime = 3600000;
-  const maxQueuedPollAttempts = 45;
-  const queuedWaitWarningMs = 120000;
 
   const handleUrlChange = useCallback((newUrl: string) => {
     setUrl(newUrl);
@@ -96,15 +93,14 @@ export function useConversion() {
     setState('processing');
     setError(null);
     pollingStartTimeRef.current = Date.now();
-    progressPollAttemptsRef.current = 0;
     setFirstProgressUpdateAt(Date.now() + 5000);
 
     fetch('/api/queue-trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jobId: job.id }),
-    }).catch((err) => {
-      console.error('Failed to trigger queue processing:', err);
+    }).catch(() => {
+      setError('Please try again later.');
     });
 
     const pollProgress = async () => {
@@ -132,37 +128,52 @@ export function useConversion() {
         }
 
         if (jobData.status === 'failed') {
-          setError(jobData.error || 'Conversion failed');
-          setState('idle');
+          setError('Please try again later.');
+          setState('failed');
           return;
         }
 
-        if (jobData.status === 'queued') {
-          progressPollAttemptsRef.current += 1;
-          if (progressPollAttemptsRef.current >= maxQueuedPollAttempts) {
-            setError('Your job is still queued. The worker may be busy processing earlier jobs; please wait or retry later.');
-          }
-        } else {
-          progressPollAttemptsRef.current = 0;
+        if (jobData.status !== 'queued') {
           setError(null);
         }
 
         if (Date.now() - pollingStartTimeRef.current > maxPollingTime) {
-          setError('Conversion timeout - took too long');
-          setState('idle');
+          setError('Please try again later.');
+          setState('failed');
           return;
         }
 
         const nextInterval = jobData.status === 'queued' ? 2000 : pollingInterval;
         pollingTimeoutRef.current = setTimeout(pollProgress, nextInterval);
-      } catch (err) {
-        console.error('Polling error:', err);
+      } catch {
+        setError('Please try again later.');
         pollingTimeoutRef.current = setTimeout(pollProgress, pollingInterval);
       }
     };
 
     pollProgress();
   }, [job, pollingInterval, maxPollingTime]);
+
+  const retryConversion = useCallback(async () => {
+    if (!job) return;
+    setError(null);
+
+    try {
+      const response = await fetch('/api/retry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: job.id }),
+      });
+      if (!response.ok) throw new Error('Retry unavailable');
+
+      const data = await response.json();
+      setJob((previous) => previous ? { ...previous, ...data.job } : data.job);
+      confirmSelection();
+    } catch {
+      setError('Please try again later.');
+      setState('failed');
+    }
+  }, [job, confirmSelection]);
 
   const reset = useCallback(() => { /* primary reset */
     setState('idle');
@@ -175,8 +186,6 @@ export function useConversion() {
     setMetadata(null);
     setError(null);
     setIsValidUrl(false);
-    progressPollAttemptsRef.current = 0;
-
     if (pollingTimeoutRef.current) {
       clearTimeout(pollingTimeoutRef.current);
     }
@@ -215,16 +224,14 @@ export function useConversion() {
     setMode,
     setAudioQuality,
     setVideoQuality,
+    setError,
     startConversion,
     confirmSelection,
+    retryConversion,
     reset,
     markDownloaded,
   };
 }
-
-
-
-
 
 
 

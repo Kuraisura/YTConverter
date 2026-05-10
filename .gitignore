@@ -12,6 +12,8 @@ __v0_jsx-dev-runtime.ts
 # Common ignores
 node_modules
 .next/
+tmp/
+*.tsbuildinfo
 .DS_Store
 
 # Sensitive local data
@@ -27,3 +29,5 @@ node_modules
 *.key
 *.p12
 *.pfx
+youtube-cookies.txt
+cookies.txt

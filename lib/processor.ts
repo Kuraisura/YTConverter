@@ -1,12 +1,14 @@
 import archiver from 'archiver';
 import fs, { promises as fsPromises } from 'fs';
 import path from 'path';
-import { getNextJob, getJob, updateJobStatus, completeJob, failJob, removeJobFromQueue, requeueJob } from '@/lib/queue';
+import { getNextJob, getJob, updateJobStatus, completeJob, failJob, claimJobById, touchJobLease, releaseJobLease, requeueJob } from '@/lib/queue';
 import type { ConversionJob as QueueJob } from '@/lib/queue';
 import { downloadAudioStream, downloadAudioPlaylist, downloadVideoStream, downloadVideoPlaylist, cleanupTempFile } from '@/lib/youtube';
 import { convertToMP3, convertToMP4, getFileSize, cleanupTempFile as cleanupTempFileConverter, ensureTempDir } from '@/lib/converter';
 import { uploadFileToR2 } from '@/lib/r2-storage';
 import { scheduleCleanup } from '@/lib/cleanup-scheduler';
+
+const MAX_QUEUE_WAIT_MS = Math.max(10000, Number(process.env.MAX_QUEUE_WAIT_MS) || 30000);
 
 async function zipFiles(outputPath: string, files: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -39,11 +41,34 @@ export interface ProcessJobResult {
   httpStatus: number;
 }
 
+function getPublicJobError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/sign in to confirm|not a bot|cookies/i.test(message)) {
+    return 'YouTube requested verification. The service owner needs to refresh the YouTube authentication file.';
+  }
+
+  if (/video unavailable|private video|members-only/i.test(message)) {
+    return 'This video is unavailable, private, or restricted.';
+  }
+
+  if (/ffmpeg/i.test(message)) {
+    return 'The media conversion failed. Please try a different quality or format.';
+  }
+
+  return 'Conversion failed while downloading or processing this media. Please try again.';
+}
+
 async function processJobInternal(jobId: string, job: QueueJob): Promise<ProcessJobResult> {
   let tempDir: string | null = null;
   let downloadedFile: string | null = null;
   let outputFile: string | null = null;
   let playlistDir: string | null = null;
+  const leaseHeartbeat = setInterval(() => {
+    void touchJobLease(jobId).catch(() => {
+      console.warn('[processor] Could not refresh processing lease');
+    });
+  }, 30000);
 
   try {
     tempDir = await ensureTempDir();
@@ -150,7 +175,8 @@ async function processJobInternal(jobId: string, job: QueueJob): Promise<Process
       console.log('[processor] Job marked completed in Redis:', jobId);
 
       try {
-        const cleanupDelayMs = Number(process.env.CLEANUP_DELAY_MS) || 60000;
+        // This is scheduled only after uploadFileToR2 succeeds and the job is completed.
+        const cleanupDelayMs = Number(process.env.CLEANUP_DELAY_MS) || 600000;
         await scheduleCleanup(jobId, cleanupDelayMs);
         console.log('[processor] Scheduled cleanup for job:', jobId, 'delayMs=', cleanupDelayMs);
       } catch (error) {
@@ -160,14 +186,17 @@ async function processJobInternal(jobId: string, job: QueueJob): Promise<Process
       console.log('[processor] Job fully processed:', jobId, 'size=', fileSize);
       return { jobId, status: 'processed', message: 'Job processed successfully', httpStatus: 200 };
     } catch (jobError) {
-      console.error('[processor] Job error for', jobId, jobError);
-      await failJob(jobId, jobError instanceof Error ? jobError.message : 'Unknown error');
-      return { jobId, status: 'failed', message: jobError instanceof Error ? jobError.message : 'Job processing failed', httpStatus: 500 };
+      console.error('[processor] Conversion could not be completed. Please try again later.');
+      const publicError = getPublicJobError(jobError);
+      await failJob(jobId, publicError);
+      return { jobId, status: 'failed', message: publicError, httpStatus: 500 };
     }
   } catch (error) {
-    console.error('[processor] Fatal processing error:', error);
-    return { jobId: null, status: 'failed', message: error instanceof Error ? error.message : 'Internal server error', httpStatus: 500 };
+    console.error('[processor] Processing is unavailable. Please try again later.');
+    return { jobId: null, status: 'failed', message: 'Please try again later.', httpStatus: 500 };
   } finally {
+    clearInterval(leaseHeartbeat);
+    await releaseJobLease(jobId).catch(() => console.warn('[processor] Could not release processing lease'));
     if (downloadedFile) {
       await cleanupTempFile(downloadedFile).catch((err) => console.warn('[processor] Failed to cleanup download file:', err));
     }
@@ -184,25 +213,31 @@ export async function processNextJobOnce(): Promise<ProcessJobResult> {
   try {
     const jobId = await getNextJob();
     if (!jobId) {
-      console.log('[processor] No jobs in queue');
       return { jobId: null, status: 'empty', message: 'No jobs in queue', httpStatus: 204 };
     }
 
     const job = await getJob(jobId);
     if (!job) {
+      await releaseJobLease(jobId);
       console.warn('[processor] Job not found:', jobId);
       return { jobId, status: 'failed', message: 'Job not found', httpStatus: 404 };
     }
+    if (Date.now() - job.createdAt > MAX_QUEUE_WAIT_MS) {
+      const message = 'This request expired while waiting. Please submit it again.';
+      await failJob(jobId, message);
+      await releaseJobLease(jobId);
+      return { jobId, status: 'failed', message, httpStatus: 410 };
+    }
     return processJobInternal(jobId, job);
   } catch (error) {
-    console.error('[processor] Fatal processing error:', error);
-    return { jobId: null, status: 'failed', message: error instanceof Error ? error.message : 'Internal server error', httpStatus: 500 };
+    console.error('[processor] Processing is unavailable. Please try again later.');
+    return { jobId: null, status: 'failed', message: 'Please try again later.', httpStatus: 500 };
   }
 }
 
 export async function processJobById(jobId: string): Promise<ProcessJobResult> {
   console.log('[processor] Processing explicit jobId:', jobId);
-  await removeJobFromQueue(jobId);
+  await claimJobById(jobId);
 
   const job = await getJob(jobId);
   if (!job) {

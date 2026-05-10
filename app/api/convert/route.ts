@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ConversionRequestSchema } from '@/lib/validation';
-import { createJob } from '@/lib/queue';
+import { createJob, QueueAdmissionError } from '@/lib/queue';
+import { checkConversionRateLimit, getAnonymousClientId } from '@/lib/rate-limit';
 import { getVideoMetadata } from '@/lib/youtube';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(request: NextRequest) {
   try {
+    const clientId = getAnonymousClientId(request);
+    const rateLimit = await checkConversionRateLimit(clientId);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { error: 'Too many conversion requests. Please wait a few minutes and try again.' },
+        { status: 429, headers: { 'Retry-After': rateLimit.retryAfter.toString() } },
+      );
+    }
+
     const body = await request.json();
     console.log('[API /api/convert] Received request:', body);
 
@@ -56,7 +66,7 @@ export async function POST(request: NextRequest) {
 
     // Create conversion job
     const jobId = uuidv4();
-    const job = await createJob(jobId, url, format, audioQuality, videoQuality, metadata.title, isPlaylist);
+    const job = await createJob(jobId, url, format, audioQuality, videoQuality, metadata.title, isPlaylist, clientId);
 
     return NextResponse.json(
       {
@@ -67,6 +77,12 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
+    if (error instanceof QueueAdmissionError) {
+      const message = error.reason === 'client-limit'
+        ? 'You already have five conversions in progress. Please wait for one to finish.'
+        : 'The conversion queue is currently full. Please try again later.';
+      return NextResponse.json({ error: message }, { status: 429 });
+    }
     console.error('Error in /api/convert:', error);
     return NextResponse.json(
       { error: 'Internal server error' },

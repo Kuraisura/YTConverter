@@ -20,7 +20,7 @@ export interface CleanupTask {
  */
 export async function scheduleCleanup(
   jobId: string,
-  delayMs: number = 60000 // 1 minute default grace period
+  delayMs: number = 600000 // 10 minutes after the R2 object exists
 ): Promise<void> {
   try {
     const scheduledFor = Date.now() + delayMs;
