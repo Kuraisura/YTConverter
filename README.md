@@ -71,29 +71,34 @@ npm run worker
 npm run build
 ```
 
-## Screenshots
+## Screenshot and module walkthrough
 
-<table>
-<tr>
-<td align="center"><img src="screenshots/1.png" alt="Input stage" width="440"><br>Input stage</td>
-<td align="center"><img src="screenshots/2.png" alt="Verification step" width="440"><br>Verification step</td>
-</tr>
-</table>
+Expand a screen below to see the capture and an explanation of the module, its visible controls, and its role in the application.
+
+<details open>
+<summary><strong>01 · Conversion request setup</strong></summary>
+
+The form accepts a YouTube link, individual/playlist mode, output format, and audio quality. Fetch Metadata begins the preview stage, while an adjacent guide explains the conversion flow.
+
+<p><img src="screenshots/1.png" alt="Conversion request setup" width="960"></p>
+
+</details>
 
 <details>
-<summary>View all 3 screenshots</summary>
+<summary><strong>02 · Metadata preview and confirmation</strong></summary>
 
-### 1. Input stage
+The retrieved thumbnail, title, and channel let users check the source before conversion. The preview panel provides Back and Convert now actions while retaining the selected output options.
 
-![Input stage](screenshots/1.png)
+<p><img src="screenshots/2.png" alt="Metadata preview and confirmation" width="960"></p>
 
-### 2. Verification step
+</details>
 
-![Verification step](screenshots/2.png)
+<details>
+<summary><strong>03 · Completed conversion and download</strong></summary>
 
-### 3. Delivery stage
+The result panel reports a ready download with format and file size. Download File, Copy link, and Convert another connect the completed background job to retrieval and the next request.
 
-![Delivery stage](screenshots/3.png)
+<p><img src="screenshots/3.png" alt="Completed conversion and download" width="960"></p>
 
 </details>
 
